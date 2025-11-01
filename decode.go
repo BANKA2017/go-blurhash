@@ -114,9 +114,9 @@ func DecodeDraw(dst draw.Image, hash string, punch float64) error {
 }
 
 func decodeDC(val int) (c [3]float64) {
-	c[0] = sRGBToLinear(val >> 16)
-	c[1] = sRGBToLinear(val >> 8 & 255)
-	c[2] = sRGBToLinear(val & 255)
+	c[0] = sRGBToLinearCache[val>>16]
+	c[1] = sRGBToLinearCache[val>>8&255]
+	c[2] = sRGBToLinearCache[val&255]
 	return c
 }
 

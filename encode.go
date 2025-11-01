@@ -34,30 +34,45 @@ func Encode(xComponents, yComponents int, img image.Image) (hash string, err err
 		return "", err
 	}
 
-	// vector of yComponents*xComponents*(RGB)
-	factors := make([][][3]float64, yComponents)
-	for y := 0; y < yComponents; y++ {
-		factors[y] = make([][3]float64, xComponents)
+	width, height := img.Bounds().Dx(), img.Bounds().Dy()
+	factorsCount := xComponents * yComponents
+
+	var cosX = make([]float64, width*factorsCount)
+	var cosY = make([]float64, height*factorsCount)
+
+	for i := 0; i < width; i++ {
 		for x := 0; x < xComponents; x++ {
-			factor := multiplyBasisFunction(x, y, img)
-			factors[y][x][0] = factor[0]
-			factors[y][x][1] = factor[1]
-			factors[y][x][2] = factor[2]
+			weight := math.Cos(math.Pi * float64(x*i) / float64(width))
+			for y := 0; y < yComponents; y++ {
+				cosX[i*factorsCount+y*xComponents+x] = weight
+			}
 		}
 	}
+
+	for i := 0; i < height; i++ {
+		for y := 0; y < yComponents; y++ {
+			weight := math.Cos(math.Pi * float64(y*i) / float64(height))
+			for x := 0; x < xComponents; x++ {
+				cosY[i*factorsCount+y*xComponents+x] = weight
+			}
+		}
+	}
+
+	factors := make([][3]float64, factorsCount)
+	multiplyBasisFunction(factors, factorsCount, img, width, height, cosX, cosY)
 
 	maximumValue := 0.0
 	if xComponents*yComponents-1 > 0 {
 		actualMaximumValue := 0.0
-		for y := 0; y < yComponents; y++ {
-			for x := 0; x < xComponents; x++ {
-				if y == 0 && x == 0 {
-					continue
-				}
-				actualMaximumValue = math.Max(math.Abs(factors[y][x][0]), actualMaximumValue)
-				actualMaximumValue = math.Max(math.Abs(factors[y][x][1]), actualMaximumValue)
-				actualMaximumValue = math.Max(math.Abs(factors[y][x][2]), actualMaximumValue)
+
+		for i := 0; i < factorsCount; i++ {
+			if i == 0 {
+				continue
 			}
+
+			actualMaximumValue = math.Max(math.Abs(factors[i][0]), actualMaximumValue)
+			actualMaximumValue = math.Max(math.Abs(factors[i][1]), actualMaximumValue)
+			actualMaximumValue = math.Max(math.Abs(factors[i][2]), actualMaximumValue)
 		}
 
 		quantisedMaximumValue := math.Max(0, math.Min(82, math.Floor(actualMaximumValue*166-0.5)))
@@ -76,24 +91,22 @@ func Encode(xComponents, yComponents int, img image.Image) (hash string, err err
 		b.WriteString(str)
 	}
 
-	dc := factors[0][0]
+	dc := factors[0]
 	str, err := base83.Encode(encodeDC(dc[0], dc[1], dc[2]), 4)
 	if err != nil {
 		return "", err
 	}
 	b.WriteString(str)
 
-	for y := 0; y < yComponents; y++ {
-		for x := 0; x < xComponents; x++ {
-			if y == 0 && x == 0 {
-				continue
-			}
-			str, err := base83.Encode(encodeAC(factors[y][x][0], factors[y][x][1], factors[y][x][2], maximumValue), 2)
-			if err != nil {
-				return "", err
-			}
-			b.WriteString(str)
+	for i := 0; i < factorsCount; i++ {
+		if i == 0 {
+			continue
 		}
+		str, err := base83.Encode(encodeAC(factors[i][0], factors[i][1], factors[i][2], maximumValue), 2)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(str)
 	}
 
 	return b.String(), nil
@@ -111,34 +124,81 @@ func encodeAC(r, g, b, maximumValue float64) int {
 	return int(quantR*19*19 + quantG*19 + quantB)
 }
 
-func multiplyBasisFunction(xComponents, yComponents int, img image.Image) [3]float64 {
-	var r, g, b float64
-	width, height := float64(img.Bounds().Dx()), float64(img.Bounds().Dy())
+func multiplyBasisFunction(factors [][3]float64, factorsCount int, img image.Image, width, height int, cosX, cosY []float64) {
+	for y := 0; y < height; y++ {
+		cosYLocal := cosY[y*factorsCount:]
+		x := 0
+		for ; x < width-3; x += 4 {
+			cosXLocal := cosX[x*factorsCount:]
 
-	normalisation := 2.0
-	if xComponents == 0 && yComponents == 0 {
-		normalisation = 1.0
-	}
-
-	for x := 0; x < img.Bounds().Dx(); x++ {
-		for y := 0; y < img.Bounds().Max.Y; y++ {
 			//cR, cG, cB, _ := img.At(x, y).RGBA()
+			c0, ok := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+			if !ok {
+				panic("not color.NRGBA")
+			}
+			c1, ok := color.NRGBAModel.Convert(img.At(x+1, y)).(color.NRGBA)
+			if !ok {
+				panic("not color.NRGBA")
+			}
+			c2, ok := color.NRGBAModel.Convert(img.At(x+2, y)).(color.NRGBA)
+			if !ok {
+				panic("not color.NRGBA")
+			}
+			c3, ok := color.NRGBAModel.Convert(img.At(x+3, y)).(color.NRGBA)
+			if !ok {
+				panic("not color.NRGBA")
+			}
+
+			var pixel10 = [4]float64{sRGBToLinearCache[int(c0.R)], sRGBToLinearCache[int(c0.G)], sRGBToLinearCache[int(c0.B)]}
+			var pixel11 = [4]float64{sRGBToLinearCache[int(c1.R)], sRGBToLinearCache[int(c1.G)], sRGBToLinearCache[int(c1.B)]}
+			var pixel12 = [4]float64{sRGBToLinearCache[int(c2.R)], sRGBToLinearCache[int(c2.G)], sRGBToLinearCache[int(c2.B)]}
+			var pixel13 = [4]float64{sRGBToLinearCache[int(c3.R)], sRGBToLinearCache[int(c3.G)], sRGBToLinearCache[int(c3.B)]}
+
+			for i := 0; i < factorsCount; i++ {
+				basis0 := cosYLocal[i] * cosXLocal[i]
+				basis1 := cosYLocal[i] * cosXLocal[i+factorsCount]
+				basis2 := cosYLocal[i] * cosXLocal[i+2*factorsCount]
+				basis3 := cosYLocal[i] * cosXLocal[i+3*factorsCount]
+
+				factors[i][0] += basis0*pixel10[0] + basis1*pixel11[0] + basis2*pixel12[0] + basis3*pixel13[0]
+				factors[i][1] += basis0*pixel10[1] + basis1*pixel11[1] + basis2*pixel12[1] + basis3*pixel13[1]
+				factors[i][2] += basis0*pixel10[2] + basis1*pixel11[2] + basis2*pixel12[2] + basis3*pixel13[2]
+			}
+		}
+
+		for ; x < width; x++ {
+			cosXLocal := cosX[x*factorsCount:]
+
 			c, ok := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
 			if !ok {
 				panic("not color.NRGBA")
 			}
-			basis := math.Cos(math.Pi*float64(xComponents)*float64(x)/width) *
-				math.Cos(math.Pi*float64(yComponents)*float64(y)/height)
-			r += basis * sRGBToLinear(int(c.R))
-			g += basis * sRGBToLinear(int(c.G))
-			b += basis * sRGBToLinear(int(c.B))
+
+			var pixel [3]float64
+			pixel[0] = sRGBToLinearCache[int(c.R)]
+			pixel[1] = sRGBToLinearCache[int(c.G)]
+			pixel[2] = sRGBToLinearCache[int(c.B)]
+
+			for i := 0; i < factorsCount; i++ {
+				basis := cosYLocal[i] * cosXLocal[i]
+
+				factors[i][0] += basis * pixel[0]
+				factors[i][1] += basis * pixel[1]
+				factors[i][2] += basis * pixel[2]
+			}
 		}
 	}
 
-	scale := normalisation / (width * height)
-	return [3]float64{
-		r * scale,
-		g * scale,
-		b * scale,
+	for i := 0; i < factorsCount; i++ {
+		normalisation := 2.0
+		if i == 0 {
+			normalisation = 1.0
+		}
+
+		scale := normalisation / float64(width*height)
+
+		factors[i][0] *= scale
+		factors[i][1] *= scale
+		factors[i][2] *= scale
 	}
 }

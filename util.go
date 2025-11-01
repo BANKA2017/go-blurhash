@@ -2,6 +2,12 @@ package blurhash
 
 import "math"
 
+func init() {
+	for v := 0; v < 256; v++ {
+		sRGBToLinearCache[v] = sRGBToLinear(v)
+	}
+}
+
 func signPow(val, exp float64) float64 {
 	sign := 1.0
 	if val < 0 {
@@ -9,6 +15,8 @@ func signPow(val, exp float64) float64 {
 	}
 	return sign * math.Pow(math.Abs(val), exp)
 }
+
+var sRGBToLinearCache = make([]float64, 256)
 
 func sRGBToLinear(val int) float64 {
 	v := float64(val) / 255
