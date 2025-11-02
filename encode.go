@@ -2,7 +2,7 @@ package blurhash
 
 import (
 	"image"
-	"image/color"
+	"image/draw"
 	"math"
 	"strings"
 
@@ -125,34 +125,28 @@ func encodeAC(r, g, b, maximumValue float64) int {
 }
 
 func multiplyBasisFunction(factors [][3]float64, factorsCount int, img image.Image, width, height int, cosX, cosY []float64) {
+	nrgba, ok := img.(*image.NRGBA)
+	if !ok {
+		bounds := img.Bounds()
+		nrgba = image.NewNRGBA(bounds)
+		draw.Draw(nrgba, bounds, img, bounds.Min, draw.Src)
+	}
+
+	stride := nrgba.Stride
+	pix := nrgba.Pix
+
 	for y := 0; y < height; y++ {
 		cosYLocal := cosY[y*factorsCount:]
 		x := 0
+
 		for ; x < width-3; x += 4 {
+			offset := y*stride + x*4
 			cosXLocal := cosX[x*factorsCount:]
 
-			//cR, cG, cB, _ := img.At(x, y).RGBA()
-			c0, ok := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
-			if !ok {
-				panic("not color.NRGBA")
-			}
-			c1, ok := color.NRGBAModel.Convert(img.At(x+1, y)).(color.NRGBA)
-			if !ok {
-				panic("not color.NRGBA")
-			}
-			c2, ok := color.NRGBAModel.Convert(img.At(x+2, y)).(color.NRGBA)
-			if !ok {
-				panic("not color.NRGBA")
-			}
-			c3, ok := color.NRGBAModel.Convert(img.At(x+3, y)).(color.NRGBA)
-			if !ok {
-				panic("not color.NRGBA")
-			}
-
-			var pixel10 = [4]float64{sRGBToLinearCache[int(c0.R)], sRGBToLinearCache[int(c0.G)], sRGBToLinearCache[int(c0.B)]}
-			var pixel11 = [4]float64{sRGBToLinearCache[int(c1.R)], sRGBToLinearCache[int(c1.G)], sRGBToLinearCache[int(c1.B)]}
-			var pixel12 = [4]float64{sRGBToLinearCache[int(c2.R)], sRGBToLinearCache[int(c2.G)], sRGBToLinearCache[int(c2.B)]}
-			var pixel13 = [4]float64{sRGBToLinearCache[int(c3.R)], sRGBToLinearCache[int(c3.G)], sRGBToLinearCache[int(c3.B)]}
+			var pixel10 = [3]float64{sRGBToLinearCache[int(pix[offset+0])], sRGBToLinearCache[int(pix[offset+1])], sRGBToLinearCache[int(pix[offset+2])]}
+			var pixel11 = [3]float64{sRGBToLinearCache[int(pix[offset+4])], sRGBToLinearCache[int(pix[offset+5])], sRGBToLinearCache[int(pix[offset+6])]}
+			var pixel12 = [3]float64{sRGBToLinearCache[int(pix[offset+8])], sRGBToLinearCache[int(pix[offset+9])], sRGBToLinearCache[int(pix[offset+10])]}
+			var pixel13 = [3]float64{sRGBToLinearCache[int(pix[offset+12])], sRGBToLinearCache[int(pix[offset+13])], sRGBToLinearCache[int(pix[offset+14])]}
 
 			for i := 0; i < factorsCount; i++ {
 				basis0 := cosYLocal[i] * cosXLocal[i]
@@ -167,17 +161,14 @@ func multiplyBasisFunction(factors [][3]float64, factorsCount int, img image.Ima
 		}
 
 		for ; x < width; x++ {
+			offset := y*stride + x*4
 			cosXLocal := cosX[x*factorsCount:]
 
-			c, ok := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
-			if !ok {
-				panic("not color.NRGBA")
+			pixel := [3]float64{
+				sRGBToLinearCache[int(pix[offset+0])],
+				sRGBToLinearCache[int(pix[offset+1])],
+				sRGBToLinearCache[int(pix[offset+3])],
 			}
-
-			var pixel [3]float64
-			pixel[0] = sRGBToLinearCache[int(c.R)]
-			pixel[1] = sRGBToLinearCache[int(c.G)]
-			pixel[2] = sRGBToLinearCache[int(c.B)]
 
 			for i := 0; i < factorsCount; i++ {
 				basis := cosYLocal[i] * cosXLocal[i]
